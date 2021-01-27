@@ -24,19 +24,15 @@
 #
 import matplotlib.pyplot as plt
 import numpy as np
-import gym
-import gym_221bbakerstreet
-
-from gym_221bbakerstreet.environments.baker_street import North, East, South, West
 
 
 def show_actions(Q, environment):
-  for row in environment.states:
+  for row in environment.states():
     for col in row:
       if col:
-        values = np.array([Q[col, a] for a in environment.actions])
+        values = np.array([Q[col, a] for a in environment.actions()])
         action = np.argmax(values)
-        klass = environment.actions[action]
+        klass = environment.actions()[action]
         if klass == North:
           print("↑ ", end = '')
         elif klass == East:
@@ -59,10 +55,11 @@ def max_action(Q, state, actions):
 if __name__ == '__main__':
   import argparse
   import os
+  import sys
 
   default_no_trials = 50000
   default_no_exploration_trials = 45000
-  default_max_no_steps = 1e4
+  default_max_no_steps = 1000
   default_every = 1000
   default_learning_rate = 1e-3
   default_discount = 1.0 - (1.0 / default_max_no_steps)
@@ -85,11 +82,6 @@ if __name__ == '__main__':
                       type = int,
                       default = default_max_no_steps,
                       help = "Maximum number of steps in a trial (default: %s)" % default_max_no_steps)
-  parser.add_argument('--every', '-v',
-                      dest = 'every_trials',
-                      type = int,
-                      default = default_every,
-                      help = "Display results every N trials (default: %s)" % default_every)
   parser.add_argument('--learningrate', '-r',
                       dest = 'learning_rate',
                       type = float,
@@ -105,24 +97,47 @@ if __name__ == '__main__':
                       type = float,
                       default = default_epsilon,
                       help = "Initial exploration (default: %.3f)" % default_epsilon)
+  parser.add_argument('--novisualisation', '-n',
+                      dest = 'visualisation',
+                      action = 'store_false',
+                      help = "No board visualisation")
   args = parser.parse_args()
 
-  environment = gym.make('BakerStreet-v1')
-  environment.render()
+  import gym
+  import gym_221bbakerstreet
 
+  from gym_221bbakerstreet.environments.baker_street import North, East, South, West
+  from tensorforce import Agent
+  from tensorforce.core.parameters import Decaying
+  from tensorforce.environments import Environment
+  from tensorforce.execution import Runner
+
+  # Environment
+  environment = Environment.create(environment = 'gym',
+                                   level = 'BakerStreet-v1',
+                                   max_episode_timesteps = args.max_no_steps,
+                                   visualize = args.visualisation)
+  agent = Agent.create(agent = 'ppo',
+                       environment = environment,
+                       learning_rate = args.learning_rate,
+                       discount = args.discount,
+                       exploration = dict(type = 'decaying',
+                                          decay = 'linear',
+                                          unit = 'episodes',
+                                          num_steps = args.no_exploration_trials,
+                                          initial_value = args.epsilon,
+                                          final_value = 0.0),
+                       batch_size = 1)
+  runner = Runner(agent = agent, environment = environment)
+
+  runner.run(num_episodes = args.no_trials)
+
+  sys.exit(0)
+  
   Q = {}
-  for square in [item for sublist in environment.states for item in sublist if item]:
-    for action in environment.actions:
+  for square in [item for sublist in environment.states() for item in sublist if item]:
+    for action in environment.actions():
       Q[square, action] = np.random.uniform(-1.0, 1.0)
-
-  # Unpack parameters
-  alpha = args.learning_rate
-  discount = args.discount
-  epsilon = args.epsilon
-  no_trials = args.no_trials
-  no_exploration_epochs = args.no_exploration_trials
-  every = args.every_trials
-  max_no_steps = args.max_no_steps
 
   total_rewards = []
   plt.gcf().canvas.set_window_title("221b Baker Street Board Route Finder (pid = %d)" % os.getpid())
@@ -133,7 +148,7 @@ if __name__ == '__main__':
   plt.pause(0.05)
   for i in range(no_trials):
     if i % every == 0:
-      show_actions(Q, environment)
+      #show_actions(Q, environment)
       print('Epoch: ', i, end = '')
     finished = False
     epoch_rewards = 0
@@ -165,7 +180,7 @@ if __name__ == '__main__':
 
   print("\nEnd")
   print("%.2f" % epoch_rewards)
-  show_actions(Q, environment)
+  #show_actions(Q, environment)
 
   plt.plot(total_rewards, linewidth = 1)
   plt.show()

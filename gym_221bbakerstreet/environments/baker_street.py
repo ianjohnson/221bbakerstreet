@@ -22,6 +22,7 @@
 # THE SOFTWARE.
 #
 import gym
+import itertools
 import numpy as np
 
 
@@ -30,7 +31,7 @@ import numpy as np
 #  N - normal square
 #  S - start square,
 #  \space - no square
-baker_street_board = [[ "N", "N", "N", "N", "N", "N", "N", "N", "D", "N", "N", "N", "Ddocks", " ", " ", " ", " ", " ", " ", " " ],
+baker_street_board = [[ "N", "N", "N", "N", "N", "N", "N", "N", "D", "N", "N", "Ddocks", " ", " ", " ", " ", " ", " ", " ", " " ],
                       [ "N", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "N", " ", " ", " ", " ", " ", " ", " ", " " ],
                       [ "D", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "N", " ", " ", " ", " ", " ", " ", " ", " " ],
                       [ "N", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "N", " ", " ", " ", " ", " ", " ", " ", " " ],
@@ -51,7 +52,7 @@ baker_street_board = [[ "N", "N", "N", "N", "N", "N", "N", "N", "D", "N", "N", "
                       [ " ", "N", "N", "N", "N", "N", "D", "Dpark", "N", "N", "N", "D", "N", "N", "N", "D", " ", " ", " ", " " ],
                       [ " ", "N", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "N", " ", " ", " ", " " ],
                       [ " ", "N", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "N", " ", " ", " ", " " ],
-                      [ " ", "Dpark", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "Dpark", "N", " ", " ", " ", " " ]]
+                      [ " ", "Dpark", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "Dpark", " ", " ", " ", " " ]]
 
 
 class Action(object):
@@ -231,7 +232,8 @@ class BakerStreetBoard(object):
 
   @property
   def dimensions(self):
-    return (len(self.__board[0]), len(self.__board))
+    d = (len(self.__board[0]), len(self.__board))
+    return d
 
   @property
   def start_square(self):
@@ -255,7 +257,7 @@ class BakerStreetBoard(object):
           self.__current_square = next_square
           self.__leaving_destination = False
       else:
-        idx = np.random.randint(0, len(self.__destinations[self.__current_square.group]['squares']) - 1)
+        idx = np.random.randint(0, len(self.__destinations[self.__current_square.group]['squares']))
         self.__current_square = self.__destinations[self.__current_square.group]['squares'][idx]
         self.__leaving_destination = True
     else:
@@ -274,13 +276,30 @@ class BakerStreetBoard(object):
 
 
 class BakerStreetEnvironment(gym.Env):
-  metadata = {'render.modes' : ['human']}
+  metadata = {
+    'render.modes': ['human', 'rgb_array'],
+    'video.frames_per_second': 50
+  }
 
   def __init__(self):
     super().__init__()
     self.__board = BakerStreetBoard(baker_street_board)
+    self.__board_width, self.__board_height = self.__board.dimensions
     self.__actions = [North, East, South, West]
     self.__visited_squares = set()
+    self.__viewer = None
+    self.__viewer_squares = dict()
+
+  @property
+  def action_space(self):
+    return gym.spaces.Discrete(len(self.actions))
+
+  @property
+  def observation_space(self):
+    return gym.spaces.Box(low = 0.0,
+                          high = 1.0,
+                          shape = (self.__board_height, self.__board_width),
+                          dtype = np.float32)
 
   @property
   def states(self):
@@ -293,33 +312,78 @@ class BakerStreetEnvironment(gym.Env):
   def random_action(self):
     return np.random.choice(self.__actions)
 
+  def __generate_observation(self, square):
+    cs = self.__board.current_square
+    x, y = (cs.x, cs.y)
+    obs = np.zeros((self.__board_height, self.__board_width))
+    obs[y][x] = 1.0
+    return obs
+
   def reset(self):
     self.__visited_squares = set()
-    return self.__board.initialise()
+    initial_square = self.__board.initialise()
+    initial_state = self.__generate_observation(initial_square)
+    return initial_state
 
-  def execute(self, action):
+  def step(self, action):
     current_square = self.__board.current_square
-    next_square = self.__board.next_square(action)
+    next_square = self.__board.next_square(self.__actions[action])
     terminal = self.__board.all_destinations_visited and next_square == self.__board.start_square
-    reward = 100 if terminal else -1 if next_square not in self.__visited_squares else -2
+    reward = 1000 if terminal else -1 if next_square not in self.__visited_squares else -2
     self.__visited_squares.add(next_square)
     if current_square == next_square:
       reward = -1000
-    return next_square, terminal, reward, {}
+    next_state = self.__generate_observation(next_square)
+    return next_state, reward, terminal, {}
 
   def render(self, mode = 'human'):
-    for row in self.__board.board:
-      for col in row:
-        if col:
-          print("□", end = '')
-          if isinstance(col, DestinationSquare):
-            print(" {%2s}" % col.group[0:2], end = '')
-          elif isinstance(col, StartSquare):
-            print(" ⌂   ", end = '')
-          else:
-            print("     ", end = '')
-        else:
-          print("======", end = '')
-      print()
+    if self.__viewer is None:
+      from gym.envs.classic_control import rendering
 
-    
+      screen_width = 600
+      screen_height = int(600 * (self.__board_height / self.__board_width))
+
+      self.__viewer = rendering.Viewer(screen_width, screen_height)
+      dx, dy = ((screen_width / self.__board_width),
+                (screen_height / self.__board_height))
+      s = 0.05
+      y = screen_height - 1
+      for row in self.__board.board:
+        x = 0
+        for col in row:
+          square = rendering.FilledPolygon([(x + s * dx, y - s * dy),
+                                              (x + s * dx, y - (dy - (s * dy))),
+                                              (x + (dx - (s * dx)), y - (dy - (s * dy))),
+                                              (x + (dx - (s * dx)), y - s * dy)])
+          if col:
+            self.__viewer_squares[col] = square
+            if isinstance(col, DestinationSquare):
+              square.set_color(0, 0, 1)
+            elif isinstance(col, StartSquare):
+              square.set_color(1, 0, 0)
+            elif isinstance(col, Square):
+              square.set_color(0.87, 0.87, 0.87)
+          else:
+            square.set_color(0, 0, 0)
+          self.__viewer.add_geom(square)
+          x += dx
+        y -= dy
+    else:
+      current_square = self.__board.current_square
+      for col, square in self.__viewer_squares.items():
+        if col is not current_square:
+          if isinstance(col, DestinationSquare):
+            square.set_color(0, 0, 1)
+          elif isinstance(col, StartSquare):
+            square.set_color(1, 0, 0)
+          elif isinstance(col, Square):
+            square.set_color(0.87, 0.87, 0.87)
+      self.__viewer_squares[current_square].set_color(1, 0.65, 0)
+
+    return self.__viewer.render(return_rgb_array = mode == 'rgb_array')
+
+  def close(self):
+    if self.__viewer:
+      self.__viewer_squares = dict()
+      self.__viewer.close()
+      self.__viewer = None
