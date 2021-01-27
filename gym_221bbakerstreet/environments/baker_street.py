@@ -49,7 +49,7 @@ baker_street_board = [[ "N", "N", "N", "N", "N", "N", "N", "N", "D", "N", "N", "
                       [ " ", "N", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "N", " ", " ", " ", " " ],
                       [ " ", "N", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "N", " ", " ", " ", " " ],
                       [ " ", "S", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "N", " ", " ", " ", " " ],
-                      [ " ", "N", "N", "N", "N", "N", "D", "Dpark", "N", "N", "N", "D", "N", "N", "N", "D", " ", " ", " ", " " ],
+                      [ " ", "N", "N", "N", "N", "N", "D", "Dpark", "N", "N", "N", "D*", "N", "N", "N", "D", " ", " ", " ", " " ],
                       [ " ", "N", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "N", " ", " ", " ", " " ],
                       [ " ", "N", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "N", " ", " ", " ", " " ],
                       [ " ", "Dpark", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "Dpark", " ", " ", " ", " " ]]
@@ -144,6 +144,10 @@ class DestinationSquare(Square):
   def __str__(self):
     return "D□{" + self.group + "}<" + ", ".join([str(a) for a in self.actions]) + ">[%d,%d]" % (self.x, self.y)
 
+class PortalDestinationSquare(DestinationSquare):
+  def __init__(self, x, y, group):
+    super(PortalDestinationSquare, self).__init__(x, y, group)
+
 class MultiDestinationSquare(DestinationSquare):
   def __init__(self, x, y, group):
     super(MultiDestinationSquare, self).__init__(x, y, group)
@@ -190,6 +194,10 @@ class BakerStreetBoard(object):
             group_id = str(BakerStreetBoard.__GROUP_ID)
             BakerStreetBoard.__GROUP_ID += 1
             destination = DestinationSquare(x, y, group_id)
+          elif group_id == '*':
+            group_id = str(BakerStreetBoard.__GROUP_ID)
+            BakerStreetBoard.__GROUP_ID += 1
+            destination = PortalDestinationSquare(x, y, group_id)
           else:
             destination = MultiDestinationSquare(x, y, group_id)
           if destination.group in destinations:
@@ -260,6 +268,16 @@ class BakerStreetBoard(object):
         idx = np.random.randint(0, len(self.__destinations[self.__current_square.group]['squares']))
         self.__current_square = self.__destinations[self.__current_square.group]['squares'][idx]
         self.__leaving_destination = True
+    elif isinstance(self.__current_square, PortalDestinationSquare):
+      group_ids = list(self.__destinations.keys())
+      idx = np.random.randint(0, len(group_ids))
+      group_id = group_ids[idx]
+      destinations = self.__destinations[group_id]
+      if isinstance(self.__current_square, MultiDestinationSquare):
+        idx = np.random.randint(0, len(self.__destinations[group_id]['squares']))
+        self.__current_square = self.__destinations[group_id]['squares'][idx]
+      else:
+        self.__current_square = self.__destinations[group_id]['squares'][0]
     else:
       self.__current_square = self.__current_square.next_square(action_class)
       # Record a visit to a destination square
@@ -329,10 +347,10 @@ class BakerStreetEnvironment(gym.Env):
     current_square = self.__board.current_square
     next_square = self.__board.next_square(self.__actions[action])
     terminal = self.__board.all_destinations_visited and next_square == self.__board.start_square
-    reward = 1000 if terminal else -1 if next_square not in self.__visited_squares else -2
+    reward = 100 if terminal else 0 if next_square not in self.__visited_squares else -1
     self.__visited_squares.add(next_square)
     if current_square == next_square:
-      reward = -1000
+      reward = -10
     next_state = self.__generate_observation(next_square)
     return next_state, reward, terminal, {}
 
@@ -357,7 +375,9 @@ class BakerStreetEnvironment(gym.Env):
                                               (x + (dx - (s * dx)), y - s * dy)])
           if col:
             self.__viewer_squares[col] = square
-            if isinstance(col, DestinationSquare):
+            if isinstance(col, PortalDestinationSquare):
+              square.set_color(0.68, 0.85, 0.9)
+            elif isinstance(col, DestinationSquare):
               square.set_color(0, 0, 1)
             elif isinstance(col, StartSquare):
               square.set_color(1, 0, 0)
@@ -372,7 +392,9 @@ class BakerStreetEnvironment(gym.Env):
       current_square = self.__board.current_square
       for col, square in self.__viewer_squares.items():
         if col is not current_square:
-          if isinstance(col, DestinationSquare):
+          if isinstance(col, PortalDestinationSquare):
+            square.set_color(0.68, 0.85, 0.9)
+          elif isinstance(col, DestinationSquare):
             square.set_color(0, 0, 1)
           elif isinstance(col, StartSquare):
             square.set_color(1, 0, 0)
