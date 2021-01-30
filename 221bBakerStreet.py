@@ -145,7 +145,7 @@ if __name__ == '__main__':
                                             num_steps = args.no_exploration_trials,
                                             initial_value = args.epsilon,
                                             final_value = 0.0),
-                         network = [dict(type = 'dense', size = 9, stride = 1, window = 3, padding = 'valid', activation = 'sigmoid'),
+                         network = [dict(type = 'conv2d', size = 9, stride = 1, window = 3, padding = 'valid', activation = 'sigmoid'),
                                     dict(type = 'flatten'),
                                     dict(type = 'dense', size = 9, activation = 'sigmoid'),
                                     dict(type = 'dense', size = 4, activation = 'sigmoid')])

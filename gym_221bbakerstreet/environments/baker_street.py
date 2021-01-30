@@ -337,7 +337,7 @@ class BakerStreetEnvironment(gym.Env):
 
   @property
   def actions(self):
-    return self.__actions
+    return dict(type = 'float', shape = len(self.__actions), min_value = 0.0, max_value = 1.0)
 
   def random_action(self):
     return np.random.choice(self.__actions)
