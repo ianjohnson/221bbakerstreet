@@ -22,7 +22,6 @@
 # THE SOFTWARE.
 #
 import gym
-import itertools
 import numpy as np
 
 
@@ -249,8 +248,19 @@ class BakerStreetBoard(object):
 
   @property
   def all_destinations_visited(self):
+    return self.__destinations['docks']['visited']
     not_visited = list(filter(lambda dest_group: self.__destinations[dest_group]['visited'] == False, self.__destinations))
     return False if len(not_visited) else True
+
+  @property
+  def destinations_visited(self):
+    visited = list(filter(lambda dest_group: self.__destinations[dest_group]['visited'], self.__destinations))
+    return len(visited) / len(self.__destinations)
+
+  def destination_group_visited(self, square):
+    if isinstance(square, DestinationSquare):
+      return self.__destinations[square.group]['visited']
+    return False
 
   @property
   def current_square(self):
@@ -299,7 +309,7 @@ class BakerStreetEnvironment(gym.Env):
     'video.frames_per_second': 50
   }
 
-  def __init__(self):
+  def __init__(self, **kwargs):
     super().__init__()
     self.__board = BakerStreetBoard(baker_street_board)
     self.__board_width, self.__board_height = self.__board.dimensions
@@ -307,6 +317,8 @@ class BakerStreetEnvironment(gym.Env):
     self.__visited_squares = set()
     self.__viewer = None
     self.__viewer_squares = dict()
+    self.__depth = int(kwargs['depth']) if 'depth' in kwargs else 3
+    self.__observation = None
 
   @property
   def action_space(self):
@@ -316,7 +328,7 @@ class BakerStreetEnvironment(gym.Env):
   def observation_space(self):
     return gym.spaces.Box(low = 0.0,
                           high = 1.0,
-                          shape = (self.__board_height, self.__board_width),
+                          shape = (self.__depth, self.__board_height, self.__board_width),
                           dtype = np.float32)
 
   @property
@@ -331,28 +343,30 @@ class BakerStreetEnvironment(gym.Env):
     return np.random.choice(self.__actions)
 
   def __generate_observation(self, square):
+    for w_idx in range (self.__depth - 1, 0, -1):
+      self.__observation[w_idx] = self.__observation[w_idx - 1]
     cs = self.__board.current_square
     x, y = (cs.x, cs.y)
-    obs = np.zeros((self.__board_height, self.__board_width))
-    obs[y][x] = 1.0
-    return obs
+    self.__observation[0] = np.zeros((self.__board_height, self.__board_width))
+    self.__observation[0][y][x] = 1.0
 
   def reset(self):
     self.__visited_squares = set()
+    self.__observation = np.zeros((self.__depth, self.__board_height, self.__board_width))
     initial_square = self.__board.initialise()
-    initial_state = self.__generate_observation(initial_square)
-    return initial_state
+    self.__generate_observation(initial_square)
+    return self.__observation
 
   def step(self, action):
     current_square = self.__board.current_square
     next_square = self.__board.next_square(self.__actions[action])
-    terminal = self.__board.all_destinations_visited and next_square == self.__board.start_square
-    reward = 100 if terminal else 0 if next_square not in self.__visited_squares else -1
+    terminal = self.__board.all_destinations_visited #and next_square == self.__board.start_square
+    reward = 1 if terminal else -1 #if next_square not in self.__visited_squares else -0.2
     self.__visited_squares.add(next_square)
     if current_square == next_square:
-      reward = -10
-    next_state = self.__generate_observation(next_square)
-    return next_state, reward, terminal, {}
+      reward = -10.0
+    self.__generate_observation(next_square)
+    return self.__observation, reward, terminal, {}
 
   def render(self, mode = 'human'):
     if self.__viewer is None:
@@ -370,13 +384,13 @@ class BakerStreetEnvironment(gym.Env):
         x = 0
         for col in row:
           square = rendering.FilledPolygon([(x + s * dx, y - s * dy),
-                                              (x + s * dx, y - (dy - (s * dy))),
-                                              (x + (dx - (s * dx)), y - (dy - (s * dy))),
-                                              (x + (dx - (s * dx)), y - s * dy)])
+                                            (x + s * dx, y - (dy - (s * dy))),
+                                            (x + (dx - (s * dx)), y - (dy - (s * dy))),
+                                            (x + (dx - (s * dx)), y - s * dy)])
           if col:
             self.__viewer_squares[col] = square
             if isinstance(col, PortalDestinationSquare):
-              square.set_color(0.68, 0.85, 0.9)
+              square.set_color(0.54, 0.17, 0.88)
             elif isinstance(col, DestinationSquare):
               square.set_color(0, 0, 1)
             elif isinstance(col, StartSquare):
@@ -393,9 +407,15 @@ class BakerStreetEnvironment(gym.Env):
       for col, square in self.__viewer_squares.items():
         if col is not current_square:
           if isinstance(col, PortalDestinationSquare):
-            square.set_color(0.68, 0.85, 0.9)
+            if self.__board.destination_group_visited(col):
+              square.set_color(1.0, 0, 1.0)
+            else:
+              square.set_color(0.54, 0.17, 0.88)
           elif isinstance(col, DestinationSquare):
-            square.set_color(0, 0, 1)
+            if self.__board.destination_group_visited(col):
+              square.set_color(0, 0.76, 1.0)
+            else:
+              square.set_color(0, 0, 1)
           elif isinstance(col, StartSquare):
             square.set_color(1, 0, 0)
           elif isinstance(col, Square):

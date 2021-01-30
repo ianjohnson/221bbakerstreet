@@ -60,6 +60,7 @@ if __name__ == '__main__':
   default_no_trials = 50000
   default_no_exploration_trials = 45000
   default_max_no_steps = 1000
+  default_evaluation_no_trials = 100
   default_every = 1000
   default_learning_rate = 1e-3
   default_discount = 1.0 - (1.0 / default_max_no_steps)
@@ -82,6 +83,11 @@ if __name__ == '__main__':
                       type = int,
                       default = default_max_no_steps,
                       help = "Maximum number of steps in a trial (default: %s)" % default_max_no_steps)
+  parser.add_argument('--evaltrials', '-l',
+                      dest = 'evaluation_no_trials',
+                      type = int,
+                      default = default_evaluation_no_trials,
+                      help = "Number of trials used for evaluation (default: %s)" % default_evaluation_no_trials)
   parser.add_argument('--learningrate', '-r',
                       dest = 'learning_rate',
                       type = float,
@@ -101,6 +107,11 @@ if __name__ == '__main__':
                       dest = 'visualisation',
                       action = 'store_false',
                       help = "No board visualisation")
+  parser.add_argument('--loadnetwork', '-k',
+                       dest = 'network',
+                       type = str,
+                       default = None,
+                       help = "Load a network to evaluate")
   args = parser.parse_args()
 
   import gym
@@ -112,25 +123,45 @@ if __name__ == '__main__':
   from tensorforce.environments import Environment
   from tensorforce.execution import Runner
 
+  convolution_depth = 3
+
   # Environment
   environment = Environment.create(environment = 'gym',
                                    level = 'BakerStreet-v1',
                                    max_episode_timesteps = args.max_no_steps,
-                                   visualize = args.visualisation)
-  agent = Agent.create(agent = 'ppo',
-                       environment = environment,
-                       learning_rate = args.learning_rate,
-                       discount = args.discount,
-                       exploration = dict(type = 'decaying',
-                                          decay = 'linear',
-                                          unit = 'episodes',
-                                          num_steps = args.no_exploration_trials,
-                                          initial_value = args.epsilon,
-                                          final_value = 0.0),
-                       batch_size = 1)
-  runner = Runner(agent = agent, environment = environment)
+                                   visualize = args.visualisation,
+                                   depth = convolution_depth)
+  if args.network is None:
+    agent = Agent.create(agent = 'ppo',
+                         environment = environment,
+                         # PPO optimization parameters
+                         batch_size = 1, update_frequency = 2, multi_step = 10,
+                         subsampling_fraction = 0.33,
+                         learning_rate = args.learning_rate,
+                         discount = args.discount,
+                         exploration = dict(type = 'decaying',
+                                            decay = 'linear',
+                                            unit = 'episodes',
+                                            num_steps = args.no_exploration_trials,
+                                            initial_value = args.epsilon,
+                                            final_value = 0.0),
+                         network = [dict(type = 'dense', size = 9, stride = 1, window = 3, padding = 'valid', activation = 'sigmoid'),
+                                    dict(type = 'flatten'),
+                                    dict(type = 'dense', size = 9, activation = 'sigmoid'),
+                                    dict(type = 'dense', size = 4, activation = 'sigmoid')])
+    runner = Runner(agent = agent, environment = environment)
+    agent.save(directory = "agents", format = "numpy", append = 'episodes')
+    runner.run(num_episodes = args.no_trials)
+    agent.save(directory = "agents", format = "numpy", append = 'episodes')
+    runner.run(num_episodes = args.evaluation_no_trials, evaluation = True)
+  else:
+    agent = Agent.load(directory = "agents", format = "numpy", environment = environment)
+    runner = Runner(agent = agent, environment = environment)
+    runner.run(num_episodes = args.evaluation_no_trials, evaluation = True)
 
-  runner.run(num_episodes = args.no_trials)
+  environment.close()
+  agent.close()
+  runner.close()
 
   sys.exit(0)
   
